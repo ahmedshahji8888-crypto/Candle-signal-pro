@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candle Signal Pro</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#172033;background:#f3f6fb}
+*{box-sizing:border-box}body{margin:0;padding:16px;max-width:980px;margin-inline:auto}
+header{padding:18px 0 8px}h1{font-size:1.65rem;margin:0 0 6px}p{line-height:1.45}
+.card{background:#fff;border:1px solid #dce3ee;border-radius:16px;padding:16px;margin:14px 0;box-shadow:0 3px 12px #1b35550a}
+.row{display:flex;gap:12px;flex-wrap:wrap}.field{flex:1;min-width:145px}
+label{display:block;font-weight:650;margin:8px 0 6px}input,select,button{font:inherit;width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}
+button{background:#1e40af;color:white;font-weight:700;border:0;cursor:pointer;margin-top:10px}button.secondary{background:#334155}
+.small{font-size:.9rem;color:#526078}.warning{background:#fff7df;border-color:#f2d38a}.signal{font-size:1.35rem;font-weight:800}.pill{display:inline-block;padding:4px 9px;border-radius:999px;background:#e8eef8;font-size:.82rem;font-weight:700}
+.buy{color:#087443}.sell{color:#b42318}.wait{color:#475569}
+table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:8px;border-bottom:1px solid #e4e9f1;white-space:nowrap} .tablewrap{overflow-x:auto}
+#results{display:none}.metric{flex:1;min-width:120px;background:#f5f7fb;border-radius:12px;padding:12px}.metric strong{display:block;font-size:1.25rem}
+code{background:#eef2f7;padding:2px 4px;border-radius:4px}
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1e40af">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+</head>
+<body>
+<header>
+  <span class="pill">CANDLE SIGNAL PRO · DEMO / RESEARCH ONLY</span>
+  <h1>Candle Signal Pro</h1>
+  <p>Mobile-friendly CALL / PUT / WAIT analysis for 1-minute and 5-minute candles, using your own historical OHLC CSV file.</p>
+</header>
+<section class="card warning">
+  <strong>Important limitation</strong>
+  <p>This is a local analysis and backtesting tool, not a live Quotex connector. It does not scrape Quotex, log in to accounts, or place trades. It only analyzes candles you import. Signals are educational examples and are not predictions or guarantees.</p>
+</section>
+<section class="card">
+  <h2>1. Load candle data</h2>
+  <p class="small">Upload a CSV with columns named <code>time,open,high,low,close</code>. Optional <code>volume</code> is ignored. Use one file per timeframe, with one-minute candles for the 1m tab and five-minute candles for the 5m tab. Timestamps should be in chronological order or sortable by date/time.</p>
+  <div class="row">
+    <div class="field"><label for="tf">Timeframe</label><select id="tf"><option value="1">1 minute</option><option value="5">5 minutes</option></select></div>
+    <div class="field"><label for="csv">CSV file</label><input id="csv" type="file" accept=".csv,text/csv"></div>
+  </div>
+  <button id="loadBtn">Load CSV & Analyze</button>
+  <p id="loadMsg" class="small" aria-live="polite">No file loaded yet.</p>
+</section>
+<section class="card">
+  <h2>2. Current signal</h2>
+  <div id="signal" class="signal wait">WAIT — load candle data</div>
+  <p id="signalWhy" class="small">A signal is only evaluated after a candle has closed.</p>
+  <div class="row">
+    <div class="metric"><span class="small">Last close</span><strong id="lastClose">—</strong></div>
+    <div class="metric"><span class="small">EMA 9</span><strong id="ema9">—</strong></div>
+    <div class="metric"><span class="small">EMA 21</span><strong id="ema21">—</strong></div>
+    <div class="metric"><span class="small">RSI 14</span><strong id="rsi">—</strong></div>
+  </div>
+</section>
+<section class="card">
+  <h2>3. Backtest</h2>
+  <p class="small">Illustrative rule: EMA 9/21 crossover confirmed at candle close, with RSI 14 filter. The next candle's open is used as the hypothetical entry. A fixed 0.2% stop and 0.4% target are simulated. If both stop and target fall within one candle, the stop is assumed first (conservative). Spread, payout, fees, slippage and execution delays are not modeled; this is not a Quotex payout simulation.</p>
+  <button id="backtestBtn" class="secondary" disabled>Run backtest</button>
+  <div id="results">
+    <div class="row" style="margin-top:12px">
+      <div class="metric"><span class="small">Signals tested</span><strong id="nTrades">—</strong></div>
+      <div class="metric"><span class="small">Win rate</span><strong id="winRate">—</strong></div>
+      <div class="metric"><span class="small">Net return*</span><strong id="netReturn">—</strong></div>
+      <div class="metric"><span class="small">Max drawdown*</span><strong id="drawdown">—</strong></div>
+    </div>
+    <p class="small">*Hypothetical price-movement model only. It does not represent binary-option payout or real-money performance.</p>
+    <div class="tablewrap"><table><thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th></tr></thead><tbody id="tradeRows"></tbody></table></div>
+  </div>
+</section>
+<section class="card">
+  <h2>Signal rules & no-trade filters</h2>
+  <ul>
+    <li><strong>CALL:</strong> EMA 9 crosses above EMA 21 on a closed candle and RSI is 50–68.</li>
+    <li><strong>PUT:</strong> EMA 9 crosses below EMA 21 on a closed candle and RSI is 32–50.</li>
+    <li><strong>WAIT:</strong> insufficient history, no fresh crossover, RSI outside the filter, or invalid data.</li>
+    <li>Never use a still-forming candle. CSV data must contain completed candles.</li>
+    <li>Do not treat these rules as a proven edge. Test on data not used to choose the rules, and use a demo environment only.</li>
+  </ul>
+</section>
+<footer class="small">Candle Signal Pro is an independent educational tool and is not affiliated with Quotex. Runs in your browser. Uploaded CSV is processed locally by this page and is not sent to a server.</footer>
+<script>
+let candles = [], analyzed = [], timeframe = 1;
+const $ = id => document.getElementById(id);
+function num(v){const x=Number(v); return Number.isFinite(x)?x:NaN}
+function fmt(x){return Number.isFinite(x)?x.toFixed(5):"—"}
+function parseCSV(text){
+  const lines=text.replace(/^\uFEFF/,"").trim().split(/\r?\n/);
+  if(lines.length<25) throw new Error("Please upload at least 25 candle rows plus a header.");
+  const headers=lines[0].split(",").map(s=>s.trim().toLowerCase());
+  const idx={}; ["time","open","high","low","close"].forEach(k=>{idx[k]=headers.indexOf(k)});
+  for(const k in idx) if(idx[k]<0) throw new Error("Missing required CSV column: "+k);
+  const out=[];
+  for(let i=1;i<lines.length;i++){
+    if(!lines[i].trim()) continue;
+    const cols=lines[i].split(",");
+    const c={time:(cols[idx.time]||"").trim(),open:num(cols[idx.open]),high:num(cols[idx.high]),low:num(cols[idx.low]),close:num(cols[idx.close])};
+    if(!c.time||![c.open,c.high,c.low,c.close].every(Number.isFinite)) continue;
+    if(c.high < Math.max(c.open,c.close,c.low) || c.low > Math.min(c.open,c.close,c.high)) continue;
+    out.push(c);
+  }
+  out.sort((a,b)=>new Date(a.time)-new Date(b.time));
+  if(out.length<25) throw new Error("Not enough valid OHLC rows after parsing.");
+  return out;
+}
+function ema(values,period){
+  const out=Array(values.length).fill(NaN), k=2/(period+1);
+  let e=values[0]; out[0]=e;
+  for(let i=1;i<values.length;i++){e=values[i]*k+e*(1-k);out[i]=e}
+  return out;
+}
+function rsi(values,period=14){
+  const out=Array(values.length).fill(NaN);
+  for(let i=period;i<values.length;i++){
+    let gains=0,losses=0;
+    for(let j=i-period+1;j<=i;j++){
+      const d=values[j]-values[j-1];
+      if(d>0) gains+=d; else losses-=d;
+    }
+    const ag=gains/period, al=losses/period;
+    out[i]=al===0?100:100-(100/(1+ag/al));
+  }
+  return out;
+}
+function enrich(data){
+  const closes=data.map(x=>x.close), e9=ema(closes,9),e21=ema(closes,21),rs=rsi(closes);
+  return data.map((c,i)=>({...c,e9:e9[i],e21:e21[i],rsi:rs[i],signal:"WAIT",why:"No confirmed crossover"})).map((c,i,a)=>{
+    if(i<22){c.why="Not enough indicator history";return c}
+    const p=a[i-1];
+    if(p.e9<=p.e21 && c.e9>c.e21){
+      if(c.rsi>=50 && c.rsi<=68){c.signal="CALL";c.why="Closed-candle bullish EMA crossover; RSI filter passed"}
+      else c.why="Bullish crossover, but RSI filter failed";
+    } else if(p.e9>=p.e21 && c.e9<c.e21){
+      if(c.rsi>=32 && c.rsi<=50){c.signal="PUT";c.why="Closed-candle bearish EMA crossover; RSI filter passed"}
+      else c.why="Bearish crossover, but RSI filter failed";
+    }
+    return c;
+  });
+}
+function showSignal(){
+  const last=analyzed[analyzed.length-1];
+  if(!last)return;
+  const el=$("signal"); el.textContent=last.signal+" — "+(last.signal==="WAIT"?"NO TRADE":"POSSIBLE SETUP");
+  el.className="signal "+(last.signal==="CALL"?"buy":last.signal==="PUT"?"sell":"wait");
+  $("signalWhy").textContent=last.why+" · "+timeframe+"-minute candles · "+last.time;
+  $("lastClose").textContent=fmt(last.close); $("ema9").textContent=fmt(last.e9);
+  $("ema21").textContent=fmt(last.e21); $("rsi").textContent=fmt(last.rsi);
+}
+function backtest(){
+  const trades=[]; let equity=100,peak=100,maxDD=0;
+  // Each entry is next candle open; walk forward until SL/TP is hit.
+  for(let i=22;i<analyzed.length-1;i++){
+    const s=analyzed[i]; if(!["CALL","PUT"].includes(s.signal))continue;
+    const entryC=analyzed[i+1], side=s.signal, entry=entryC.open;
+    const dist=entry*0.002, sl=side==="CALL"?entry-dist:entry+dist;
+    const tp=side==="CALL"?entry+dist*2:entry-dist*2;
+    let exit=null,result="Unresolved",exitTime="";
+    for(let j=i+1;j<analyzed.length;j++){
+      const c=analyzed[j];
+      const stop=side==="CALL"?c.low<=sl:c.high>=sl;
+      const target=side==="CALL"?c.high>=tp:c.low<=tp;
+      if(stop){exit=sl;result="Loss";exitTime=c.time;break}
+      if(target){exit=tp;result="Win";exitTime=c.time;break}
+    }
+    if(exit===null)continue;
+    const ret=side==="CALL"?(exit-entry)/entry:(entry-exit)/entry;
+    equity*=1+ret; peak=Math.max(peak,equity); maxDD=Math.max(maxDD,(peak-equity)/peak);
+    trades.push({time:entryC.time,side,entry,exit,result,ret});
+    // Avoid overlapping positions in this simple simulator.
+    const endIndex=analyzed.findIndex(c=>c.time===exitTime);
+    if(endIndex>i+1)i=endIndex-1;
+  }
+  $("results").style.display="block";
+  $("nTrades").textContent=trades.length;
+  $("winRate").textContent=trades.length?(100*trades.filter(t=>t.result==="Win").length/trades.length).toFixed(1)+"%":"0%";
+  $("netReturn").textContent=((equity/100-1)*100).toFixed(2)+"%";
+  $("drawdown").textContent=(maxDD*100).toFixed(2)+"%";
+  $("tradeRows").innerHTML=trades.slice(-100).reverse().map(t=>`<tr><td>${escapeHTML(t.time)}</td><td class="${t.side==="CALL"?"buy":"sell"}">${t.side}</td><td>${fmt(t.entry)}</td><td>${fmt(t.exit)}</td><td>${t.result}</td></tr>`).join("");
+}
+function escapeHTML(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+$("loadBtn").addEventListener("click",async()=>{
+  try{
+    if(!$("csv").files[0])throw new Error("Choose a CSV file first.");
+    const text=await $("csv").files[0].text();
+    candles=parseCSV(text); timeframe=Number($("tf").value); analyzed=enrich(candles);
+    showSignal(); $("backtestBtn").disabled=false;
+    $("loadMsg").textContent=`Loaded ${candles.length} candles for ${timeframe}-minute timeframe. Last candle: ${candles[candles.length-1].time}.`;
+    $("results").style.display="none";
+  }catch(e){$("loadMsg").textContent="Error: "+e.message}
+});
+$("backtestBtn").addEventListener("click",backtest);
+</script>
+<script>
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+}
+</script>
+</body>
+</html>
